@@ -1,0 +1,48 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Environment
+.env
+.env.local
+*.env
+!.env.example
+
+# Database (SQLite in WAL mode also writes -wal and -shm sidecars)
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+
+# ML artifacts (regenerate with `python -m app.ml.train`)
+backend/app/ml/artifacts/*.joblib
+backend/app/ml/artifacts/*.json
+
+# Uploaded media
+backend/media/reports/*
+!backend/media/reports/.gitkeep
+
+# Node
+node_modules/
+dist/
+dist-ssr/
+.vite/
+*.local
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
