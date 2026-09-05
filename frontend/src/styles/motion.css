@@ -1,0 +1,244 @@
+/* ==========================================================================
+   Motion and interaction system
+
+   Animation in a disaster control room has to earn its place. The rules:
+
+   * Motion carries meaning. A pulsing marker means "this slope is critical
+     right now" - never "this looked nice in a demo".
+   * Nothing loops forever except genuine live-state indicators. Decorative
+     loops in a room someone watches for a twelve-hour shift are hostile.
+   * Everything is gated behind `prefers-reduced-motion`. An operator with
+     vestibular sensitivity still has to be able to read the map.
+   * Transforms and opacity only, so animation stays on the compositor rather
+     than competing with Leaflet for the main thread.
+   ========================================================================== */
+
+@keyframes pv-fade-up {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: none; }
+}
+
+@keyframes pv-fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+@keyframes pv-pulse-ring {
+  0%   { transform: scale(0.8); opacity: 0.7; }
+  70%  { transform: scale(2.1); opacity: 0; }
+  100% { transform: scale(2.1); opacity: 0; }
+}
+
+@keyframes pv-breathe {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.4; }
+}
+
+@keyframes pv-shimmer {
+  from { background-position: -420px 0; }
+  to   { background-position: 420px 0; }
+}
+
+@keyframes pv-slide-in-right {
+  from { opacity: 0; transform: translateX(24px); }
+  to   { opacity: 1; transform: none; }
+}
+
+@keyframes pv-pop {
+  0%   { transform: scale(0.94); opacity: 0; }
+  60%  { transform: scale(1.02); }
+  100% { transform: scale(1); opacity: 1; }
+}
+
+@keyframes pv-sweep {
+  from { transform: translateX(-110%); }
+  to   { transform: translateX(110%); }
+}
+
+@keyframes pv-spin {
+  to { transform: rotate(360deg); }
+}
+
+/* --- Entrance ---------------------------------------------------------- */
+
+.pv-enter {
+  animation: pv-fade-up 0.4s cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation-delay: calc(var(--i, 0) * 55ms);
+}
+
+.pv-pop { animation: pv-pop 0.3s cubic-bezier(0.22, 1, 0.36, 1) both; }
+
+/* --- Live state -------------------------------------------------------- */
+
+.pv-live-dot { position: relative; display: inline-flex; }
+.pv-live-dot::after {
+  content: '';
+  position: absolute; inset: 0;
+  border-radius: 50%;
+  background: currentColor;
+  animation: pv-pulse-ring 2.4s cubic-bezier(0, 0, 0.2, 1) infinite;
+}
+
+.pv-breathe { animation: pv-breathe 2.6s ease-in-out infinite; }
+
+/* --- Cards ------------------------------------------------------------- */
+
+.card {
+  transition: border-color 0.18s ease, transform 0.18s ease, box-shadow 0.18s ease;
+}
+.card.pv-hover:hover {
+  transform: translateY(-2px);
+  border-color: var(--border);
+  box-shadow: var(--shadow-sm);
+}
+
+.stat-value { transition: color 0.3s ease; }
+
+.card.pv-toned { position: relative; overflow: hidden; }
+.card.pv-toned::before {
+  content: '';
+  position: absolute; left: 0; top: 0; bottom: 0;
+  width: 3px;
+  background: var(--pv-tone, transparent);
+}
+
+/* Only the genuinely urgent tiles sweep, and only while they are urgent. */
+.card.pv-urgent::after {
+  content: '';
+  position: absolute; inset: 0;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    color-mix(in srgb, var(--pv-tone, var(--accent)) 14%, transparent),
+    transparent
+  );
+  animation: pv-sweep 3.6s ease-in-out infinite;
+  pointer-events: none;
+}
+
+/* --- Controls ---------------------------------------------------------- */
+
+button, .btn {
+  transition: background 0.15s ease, border-color 0.15s ease,
+              transform 0.12s ease, box-shadow 0.15s ease;
+}
+button:active:not(:disabled) { transform: scale(0.975); }
+button.primary:hover:not(:disabled) { box-shadow: 0 0 0 3px var(--accent-soft); }
+
+.nav-item { transition: background 0.15s ease, color 0.15s ease, transform 0.12s ease; }
+.nav-item:hover { transform: translateX(2px); }
+
+tr.clickable td { transition: background 0.14s ease; }
+
+.meter > span { transition: width 0.7s cubic-bezier(0.22, 1, 0.36, 1); }
+
+/* --- Skeleton loading --------------------------------------------------- */
+
+.pv-skeleton {
+  background: linear-gradient(
+    90deg, var(--surface-2) 0%, var(--surface-3) 45%, var(--surface-2) 90%
+  );
+  background-size: 420px 100%;
+  animation: pv-shimmer 1.35s linear infinite;
+  border-radius: var(--radius-sm);
+}
+.pv-skeleton-line { height: 11px; margin-bottom: 9px; }
+.pv-skeleton-line:last-child { margin-bottom: 0; width: 62%; }
+
+/* --- Toasts ------------------------------------------------------------- */
+
+.pv-toasts {
+  position: fixed; right: 18px; bottom: 18px; z-index: 3000;
+  display: flex; flex-direction: column; gap: 9px;
+  max-width: min(390px, calc(100vw - 36px));
+}
+.pv-toast {
+  display: flex; gap: 10px; align-items: flex-start;
+  padding: 12px 14px; border-radius: var(--radius);
+  background: var(--bg-elev); border: 1px solid var(--border);
+  box-shadow: var(--shadow); font-size: 0.8rem; line-height: 1.5;
+  animation: pv-slide-in-right 0.32s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.pv-toast.critical { border-color: var(--risk-critical); background: var(--risk-critical-soft); }
+.pv-toast.high { border-color: var(--risk-high); background: var(--risk-high-soft); }
+.pv-toast.ok { border-color: var(--risk-low); }
+.pv-toast strong { display: block; margin-bottom: 2px; }
+.pv-toast .pv-toast-close {
+  background: none; border: none; padding: 0 2px; color: var(--text-mute);
+  font-size: 1rem; line-height: 1; cursor: pointer; margin-left: auto;
+}
+
+/* --- Command palette ----------------------------------------------------- */
+
+.pv-palette-backdrop {
+  position: fixed; inset: 0; z-index: 4000;
+  background: rgba(4, 9, 19, 0.62);
+  backdrop-filter: blur(3px);
+  display: flex; justify-content: center; align-items: flex-start;
+  padding: 12vh 20px 20px;
+  animation: pv-fade-in 0.16s ease both;
+}
+.pv-palette {
+  width: min(620px, 100%);
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  box-shadow: var(--shadow);
+  overflow: hidden;
+  animation: pv-pop 0.22s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.pv-palette input {
+  border: none; border-bottom: 1px solid var(--border-soft);
+  border-radius: 0; padding: 15px 18px; font-size: 0.95rem; background: transparent;
+}
+.pv-palette input:focus { box-shadow: none; border-color: var(--border-soft); }
+.pv-palette-list { max-height: 46vh; overflow-y: auto; padding: 6px; }
+.pv-palette-item {
+  display: flex; align-items: center; gap: 11px;
+  padding: 10px 12px; border-radius: var(--radius-sm);
+  cursor: pointer; font-size: 0.85rem;
+}
+.pv-palette-item.on { background: var(--accent-soft); }
+.pv-palette-item .kind {
+  font-size: 0.62rem; text-transform: uppercase; letter-spacing: 0.08em;
+  color: var(--text-mute); margin-left: auto; white-space: nowrap;
+}
+.pv-palette-foot {
+  padding: 9px 16px; border-top: 1px solid var(--border-soft);
+  font-size: 0.7rem; color: var(--text-mute);
+  display: flex; gap: 14px; flex-wrap: wrap;
+}
+kbd {
+  font-family: var(--mono); font-size: 0.68rem;
+  padding: 1px 5px; border-radius: 4px;
+  background: var(--surface-2); border: 1px solid var(--border);
+}
+
+/* --- Map --------------------------------------------------------------- */
+
+.pv-pulse-critical { animation: pv-breathe 1.8s ease-in-out infinite; }
+.pv-pulse-high { animation: pv-breathe 2.9s ease-in-out infinite; }
+
+/* --- Radial gauge ------------------------------------------------------- */
+
+.pv-gauge-track { stroke: var(--surface-3); }
+.pv-gauge-value {
+  transition: stroke-dashoffset 0.9s cubic-bezier(0.22, 1, 0.36, 1),
+              stroke 0.4s ease;
+}
+
+/* --- Sparkline ---------------------------------------------------------- */
+
+.pv-spark path { transition: d 0.5s ease; }
+
+/* --- Reduced motion ------------------------------------------------------ */
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+  .pv-live-dot::after { display: none; }
+  .card.pv-urgent::after { display: none; }
+}

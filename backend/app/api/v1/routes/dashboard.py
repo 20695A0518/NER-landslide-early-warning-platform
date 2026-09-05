@@ -46,6 +46,26 @@ def _latest_assessments(db: Session) -> dict[int, RiskAssessment]:
     return newest
 
 
+def _recent_trend(db: Session, limit_per_zone: int = 12) -> dict[int, list[float]]:
+    """Recent probability history per zone, oldest first, for sparklines.
+
+    One ordered scan rather than a subquery per zone: at 37 zones the obvious
+    implementation costs 37 round trips every time the dashboard refreshes,
+    which is a minute-by-minute cost for a decorative column.
+    """
+    rows = db.execute(
+        select(RiskAssessment.zone_id, RiskAssessment.probability)
+        .order_by(RiskAssessment.zone_id, desc(RiskAssessment.assessed_at))
+    ).all()
+
+    trend: dict[int, list[float]] = {}
+    for zone_id, probability in rows:
+        series = trend.setdefault(zone_id, [])
+        if len(series) < limit_per_zone:
+            series.append(round(probability, 4))
+    return {zone_id: list(reversed(series)) for zone_id, series in trend.items()}
+
+
 @router.get("/summary", response_model=DashboardSummary)
 def summary(db: DbSession, state: str | None = None):
     """The single call that paints the control-room overview."""
@@ -57,6 +77,7 @@ def summary(db: DbSession, state: str | None = None):
     zone_ids = {z.id for z in zones}
 
     assessments = _latest_assessments(db)
+    trends = _recent_trend(db)
     distribution = RiskDistribution()
     population_at_risk = 0
     ranked: list[dict] = []
@@ -82,6 +103,7 @@ def summary(db: DbSession, state: str | None = None):
                 "lead_time_hours": assessment.lead_time_hours if assessment else None,
                 "factor_of_safety": assessment.factor_of_safety if assessment else None,
                 "narrative": assessment.narrative if assessment else None,
+                "trend": trends.get(zone.id, []),
             }
         )
 

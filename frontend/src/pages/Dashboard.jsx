@@ -5,7 +5,8 @@ import {
   Tooltip, XAxis, YAxis,
 } from 'recharts'
 
-import { Card, Empty, Kpi, Meter, Notice, RiskBadge, Spinner } from '../components/ui'
+import { Card, Empty, Kpi, Meter, Notice, RiskBadge } from '../components/ui'
+import { Sparkline, SkeletonCard } from '../components/motion'
 import { api } from '../lib/api'
 import { getCache, putCache } from '../lib/offline'
 import { RISK_COLORS, num, pct, shortTime, timeAgo } from '../lib/format'
@@ -94,7 +95,19 @@ export default function DashboardPage({ online }) {
   if (error && !summary) {
     return <div className="content"><Notice tone="danger">{error}</Notice></div>
   }
-  if (!summary) return <div className="content"><Spinner label="Loading control room" /></div>
+  if (!summary) {
+    return (
+      <div className="content">
+        <div className="grid kpi">
+          {Array.from({ length: 6 }).map((_, i) => <SkeletonCard key={i} lines={2} />)}
+        </div>
+        <div className="grid two" style={{ marginTop: 14 }}>
+          <SkeletonCard lines={6} />
+          <SkeletonCard lines={6} />
+        </div>
+      </div>
+    )
+  }
 
   const d = summary.risk_distribution
   const elevated = (d.high || 0) + (d.critical || 0)
@@ -134,40 +147,50 @@ export default function DashboardPage({ online }) {
 
       <div className="grid kpi" style={{ marginTop: 14 }}>
         <Kpi
+          index={0}
           label="Zones monitored"
-          value={num(summary.zones_monitored)}
+          count={summary.zones_monitored}
           note={`${num(summary.population_monitored)} people covered`}
         />
         <Kpi
+          index={1}
           label="Elevated risk"
-          value={num(elevated)}
+          count={elevated}
           tone={elevated ? 'high' : undefined}
+          urgent={d.critical > 0}
           note={`${num(summary.population_at_risk)} people exposed`}
           onClick={() => navigate('/map')}
         />
         <Kpi
+          index={2}
           label="Active alerts"
-          value={num(summary.active_alerts)}
+          count={summary.active_alerts}
           tone={summary.critical_alerts ? 'critical' : summary.active_alerts ? 'high' : undefined}
+          urgent={summary.critical_alerts > 0}
           note={`${summary.critical_alerts} critical`}
           onClick={() => navigate('/alerts')}
         />
         <Kpi
+          index={3}
           label="Roads affected"
-          value={num(summary.roads_blocked + summary.roads_restricted)}
+          count={summary.roads_blocked + summary.roads_restricted}
           tone={summary.roads_blocked ? 'critical' : summary.roads_restricted ? 'moderate' : undefined}
+          urgent={summary.roads_blocked > 0}
           note={`${summary.roads_blocked} blocked, ${summary.lifeline_roads_affected} lifeline`}
           onClick={() => navigate('/roads')}
         />
         <Kpi
+          index={4}
           label="Sensor network"
-          value={pct(sensorAvail)}
+          count={sensorAvail * 100}
+          format={(v) => `${v}%`}
           tone={sensorAvail < 0.8 ? 'moderate' : undefined}
           note={`${summary.sensors_online} of ${summary.sensors_total} online`}
         />
         <Kpi
+          index={5}
           label="Field reports"
-          value={num(summary.reports_last_24h)}
+          count={summary.reports_last_24h}
           note={`${summary.pending_reports} awaiting verification`}
           onClick={() => navigate('/reports')}
         />
@@ -175,6 +198,7 @@ export default function DashboardPage({ online }) {
 
       <div className="grid two" style={{ marginTop: 14 }}>
         <Card
+          index={6}
           title="Risk distribution"
           subtitle={`Across ${summary.zones_monitored} monitored slope units`}
           actions={
@@ -221,6 +245,7 @@ export default function DashboardPage({ online }) {
         </Card>
 
         <Card
+          index={7}
           title="Emergency response queue"
           subtitle="Ranked by severity, exposure, lifeline impact and remoteness"
         >
@@ -237,8 +262,9 @@ export default function DashboardPage({ online }) {
                   </tr>
                 </thead>
                 <tbody>
-                  {summary.response_queue.map((q) => (
-                    <tr key={q.reference} className="clickable"
+                  {summary.response_queue.map((q, i) => (
+                    <tr key={q.reference} className="clickable pv-enter"
+                        style={{ '--i': i }}
                         onClick={() => navigate(`/zones/${q.zone_id}`)}>
                       <td className="dim">{q.rank}</td>
                       <td>
@@ -263,7 +289,7 @@ export default function DashboardPage({ online }) {
       </div>
 
       <div className="grid two" style={{ marginTop: 14 }}>
-        <Card title="Highest-risk slope units" subtitle="Latest assessment per zone">
+        <Card index={8} title="Highest-risk slope units" subtitle="Latest assessment per zone">
           <div className="table-scroll">
             <table>
               <thead>
@@ -271,6 +297,7 @@ export default function DashboardPage({ online }) {
                   <th>Zone</th>
                   <th>State</th>
                   <th style={{ width: 120 }}>Risk</th>
+                  <th style={{ width: 80 }}>Trend</th>
                   <th className="num">Lead time</th>
                 </tr>
               </thead>
@@ -291,6 +318,12 @@ export default function DashboardPage({ online }) {
                         </div>
                       </div>
                     </td>
+                    <td>
+                      <Sparkline
+                        values={z.trend || []}
+                        color={RISK_COLORS[z.risk_level]}
+                      />
+                    </td>
                     <td className="num">{z.lead_time_hours ? `${z.lead_time_hours} h` : '-'}</td>
                   </tr>
                 ))}
@@ -300,6 +333,7 @@ export default function DashboardPage({ online }) {
         </Card>
 
         <Card
+          index={9}
           title="Rainfall anomaly"
           subtitle="Departure from each locality's own daily normal, not absolute total"
         >
@@ -344,7 +378,7 @@ export default function DashboardPage({ online }) {
       </div>
 
       {stats && (
-        <Card title="Regional roll-up" subtitle="By state" style={{ marginTop: 14 }}>
+        <Card index={10} title="Regional roll-up" subtitle="By state" style={{ marginTop: 14 }}>
           <div className="table-scroll">
             <table>
               <thead>

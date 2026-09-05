@@ -4,7 +4,8 @@ import {
   Area, AreaChart, CartesianGrid, Line, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from 'recharts'
 
-import { Card, Empty, FactorList, Kpi, Notice, RiskBadge, Spinner, StatusBadge } from '../components/ui'
+import { Card, Empty, FactorList, Kpi, Notice, RiskBadge, StatusBadge } from '../components/ui'
+import { RiskGauge, SkeletonCard } from '../components/motion'
 import { api } from '../lib/api'
 import { fosTone, num, pct, shortTime, timeAgo } from '../lib/format'
 
@@ -46,7 +47,19 @@ export default function ZoneDetailPage() {
   }
 
   if (error && !zone) return <div className="content"><Notice tone="danger">{error}</Notice></div>
-  if (!zone) return <div className="content"><Spinner label="Loading zone" /></div>
+  if (!zone) {
+    return (
+      <div className="content">
+        <div className="grid kpi">
+          {Array.from({ length: 6 }).map((_, i) => <SkeletonCard key={i} lines={2} />)}
+        </div>
+        <div className="grid two" style={{ marginTop: 14 }}>
+          <SkeletonCard lines={7} />
+          <SkeletonCard lines={7} />
+        </div>
+      </div>
+    )
+  }
 
   const a = zone.latest_assessment
   const series = [...assessments].reverse().map((row) => ({
@@ -76,36 +89,53 @@ export default function ZoneDetailPage() {
 
       {error && <Notice tone="danger" style={{ marginBottom: 14 }}>{error}</Notice>}
 
-      <div className="grid kpi">
+      <div
+        className="grid"
+        style={{ gridTemplateColumns: 'auto minmax(0, 1fr)', alignItems: 'stretch' }}
+      >
+        <div className="card pv-enter" style={{ display: 'grid', placeItems: 'center' }}>
+          <RiskGauge
+            value={a?.probability ?? 0}
+            level={a?.risk_level ?? 'low'}
+            label="Failure probability"
+            sublabel={a ? `${pct(a.confidence)} confidence` : undefined}
+          />
+        </div>
+
+        <div className="grid kpi" style={{ alignContent: 'start' }}>
         <Kpi
-          label="Failure probability"
-          value={a ? pct(a.probability, 1) : '-'}
-          tone={a?.risk_level}
-          note={a ? `${pct(a.confidence)} model confidence` : undefined}
-        />
-        <Kpi
+          index={0}
           label="Factor of safety"
           value={a ? a.factor_of_safety.toFixed(2) : '-'}
           tone={a ? fosTone(a.factor_of_safety) : undefined}
           note={a && a.factor_of_safety < 1 ? 'Below stability limit' : 'Above stability limit'}
         />
         <Kpi
+          index={1}
           label="Rainfall threshold"
           value={a ? `${a.rainfall_threshold_ratio.toFixed(2)}x` : '-'}
           tone={a && a.rainfall_threshold_ratio >= 1 ? 'high' : undefined}
           note="Normalised to local climate"
         />
         <Kpi
+          index={2}
           label="Lead time"
           value={a ? `${a.lead_time_hours} h` : '-'}
           note="Estimated warning window"
         />
-        <Kpi label="Population" value={num(zone.population)} note={`${zone.area_sq_km} km2`} />
         <Kpi
+          index={3}
+          label="Population"
+          count={zone.population}
+          note={`${zone.area_sq_km} km2`}
+        />
+        <Kpi
+          index={4}
           label="Past events"
-          value={num(zone.historical_event_count)}
+          count={zone.historical_event_count}
           note="In the seeded inventory"
         />
+        </div>
       </div>
 
       {a?.narrative && (
@@ -116,6 +146,7 @@ export default function ZoneDetailPage() {
 
       <div className="grid two" style={{ marginTop: 14 }}>
         <Card
+          index={5}
           title="Why this score"
           subtitle="Per-zone drivers, not model-wide averages"
         >
@@ -128,7 +159,7 @@ export default function ZoneDetailPage() {
           )}
         </Card>
 
-        <Card title="Risk trajectory" subtitle="Probability and factor of safety over time">
+        <Card index={6} title="Risk trajectory" subtitle="Probability and factor of safety over time">
           {series.length > 1 ? (
             <div style={{ height: 250 }}>
               <ResponsiveContainer width="100%" height="100%">

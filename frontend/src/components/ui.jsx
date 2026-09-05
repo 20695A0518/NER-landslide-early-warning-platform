@@ -1,6 +1,7 @@
 /** Small shared presentational components. */
 
-import { RISK_LABELS, num, pct } from '../lib/format'
+import { AnimatedNumber } from './motion'
+import { RISK_COLORS, RISK_LABELS, num, pct } from '../lib/format'
 
 export function RiskBadge({ level, children }) {
   const key = (level || 'low').toLowerCase()
@@ -17,28 +18,48 @@ export function StatusBadge({ status }) {
   return <span className={`badge ${tone}`}>{status}</span>
 }
 
-export function Kpi({ label, value, note, tone, onClick }) {
+/**
+ * A headline figure.
+ *
+ * Pass `count` for a numeric value and it animates to its new figure, which
+ * makes a change during a live refresh visible instead of silently swapping.
+ * `urgent` adds a slow sweep - reserved for tiles that mean someone has to act
+ * now, because if everything shimmers, nothing does.
+ */
+export function Kpi({ label, value, count, format, note, tone, urgent, onClick, index = 0 }) {
+  const toneColor = tone ? RISK_COLORS[tone] || `var(--risk-${tone})` : undefined
   return (
     <div
-      className="card stat"
+      className={[
+        'card', 'stat', 'pv-enter',
+        tone ? 'pv-toned' : '',
+        urgent ? 'pv-urgent' : '',
+        onClick ? 'pv-hover' : '',
+      ].filter(Boolean).join(' ')}
       onClick={onClick}
-      style={onClick ? { cursor: 'pointer' } : undefined}
+      style={{
+        cursor: onClick ? 'pointer' : undefined,
+        '--i': index,
+        '--pv-tone': toneColor,
+      }}
     >
       <span className="stat-label">{label}</span>
-      <span
-        className="stat-value"
-        style={tone ? { color: `var(--risk-${tone})` } : undefined}
-      >
-        {value}
+      <span className="stat-value" style={toneColor ? { color: toneColor } : undefined}>
+        {count !== undefined
+          ? <AnimatedNumber value={count} format={format} />
+          : value}
       </span>
       {note && <span className="stat-note">{note}</span>}
     </div>
   )
 }
 
-export function Card({ title, subtitle, actions, children, className = '', style }) {
+export function Card({ title, subtitle, actions, children, className = '', style, index }) {
   return (
-    <div className={`card ${className}`} style={style}>
+    <div
+      className={`card ${index !== undefined ? 'pv-enter' : ''} ${className}`}
+      style={index !== undefined ? { ...style, '--i': index } : style}
+    >
       {(title || actions) && (
         <div className="card-head">
           <div>

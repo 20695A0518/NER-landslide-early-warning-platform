@@ -219,6 +219,36 @@ Built for valleys that lose signal for hours.
 
 ---
 
+## Interface
+
+Built for a room where someone watches this for a twelve-hour shift.
+
+- **Command palette** (`Ctrl`/`Cmd` + `K`) with subsequence matching, so `azqb`
+  finds *Aizawl City Quarry Belt*. With 37 zones and 25 road segments, typing
+  three letters beats scrolling a map during an incident. Opens on whatever is
+  currently elevated when the query is empty.
+- **Escalation toasts.** A zone crossing into high or critical raises a toast on
+  whatever page you are on. It fires on the *transition*, not on every poll, and
+  the first poll of a session adopts the current state silently rather than
+  announcing standing alerts as if they just happened.
+- **Live indicators.** A breathing dot and a relative "updated" stamp, so a
+  frozen feed is distinguishable from a quiet one.
+- **Animated figures.** KPI values count to their new number, so a change during
+  a background refresh is visible rather than silently swapped. Risk probability
+  is a 270-degree radial gauge; the top-risk table carries per-zone sparklines
+  fed by real assessment history from the API.
+- **Urgency is rationed.** Only tiles that mean someone must act now carry the
+  slow sweep animation. If everything shimmers, nothing does.
+- **Skeletons, not spinners**, so layout does not jump when data lands.
+
+Every animation is gated behind `prefers-reduced-motion` and degrades to a
+static render. That is a requirement, not a courtesy: motion sensitivity is
+common, and an un-skippable animation would make the platform unusable for some
+of the people it is built for. Transforms and opacity only, so animation stays
+on the compositor rather than competing with Leaflet for the main thread.
+
+---
+
 ## Multilingual alerting
 
 Eight languages: English, Hindi, Assamese, Bengali, Manipuri (Meiteilon), Khasi,

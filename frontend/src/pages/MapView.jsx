@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   CircleMarker, LayerGroup, MapContainer, Polygon, Polyline, Popup, TileLayer, Tooltip,
@@ -6,6 +6,7 @@ import {
 } from 'react-leaflet'
 
 import { Empty, RiskBadge, Spinner } from '../components/ui'
+import { LiveDot } from '../components/motion'
 import { api } from '../lib/api'
 import { getCache, putCache } from '../lib/offline'
 import { RISK_COLORS, ROAD_COLORS, num, pct, timeAgo } from '../lib/format'
@@ -24,20 +25,69 @@ const ZOOM = 6
  */
 function FitToZones({ zones, filterKey }) {
   const map = useMap()
+  const fittedFor = useRef(null)
 
   useEffect(() => {
     if (!zones.length) return
+
     const lats = zones.map((z) => z.latitude)
     const lons = zones.map((z) => z.longitude)
-    map.fitBounds(
-      [[Math.min(...lats), Math.min(...lons)], [Math.max(...lats), Math.max(...lons)]],
-      { padding: [60, 60], maxZoom: 9 },
-    )
-    // Refit when the filter changes the visible set, not on every re-render.
+    const bounds = [
+      [Math.min(...lats), Math.min(...lons)],
+      [Math.max(...lats), Math.max(...lons)],
+    ]
+    const container = map.getContainer()
+
+    const attemptFit = () => {
+      map.invalidateSize({ animate: false })
+      // Leaflet computes the fit zoom from the container size. Inside a flex
+      // column that size is still 0 on the first frames after a route change,
+      // so fitting then picks a zoom for a collapsed box and lands the view on
+      // one hillside. Wait for a container that has actually been laid out.
+      if (container.clientWidth < 80 || container.clientHeight < 80) return false
+
+      const isRefit = fittedFor.current !== null
+      const options = { padding: [50, 50], maxZoom: 9 }
+      if (isRefit) {
+        map.flyToBounds(bounds, { ...options, duration: 0.7 })
+      } else {
+        // No animation on the first fit - flying in from a wrong viewport
+        // reads as a glitch rather than a transition.
+        map.fitBounds(bounds, options)
+      }
+      return true
+    }
+
+    if (fittedFor.current !== filterKey && attemptFit()) {
+      fittedFor.current = filterKey
+    }
+
+    // Belt and braces. The ResizeObserver gets the geometry right, but Leaflet
+    // decides which tiles to request from the size it knew at that moment, and
+    // on a slow first paint that can leave the outer tiles unrequested until
+    // something else nudges it. One settling pass after the layout has
+    // definitely finished costs nothing and fills the map.
+    const settle = setTimeout(() => map.invalidateSize({ animate: false }), 350)
+
+    // Keep observing: the panel layout, a window resize and the sidebar
+    // collapsing on mobile all change the container after the first paint.
+    const observer = new ResizeObserver(() => {
+      if (fittedFor.current === filterKey) {
+        map.invalidateSize({ animate: false })
+      } else if (attemptFit()) {
+        fittedFor.current = filterKey
+      }
+    })
+    observer.observe(container)
+    return () => {
+      clearTimeout(settle)
+      observer.disconnect()
+    }
   }, [map, filterKey, zones.length])
 
   return null
 }
+
 
 /**
  * Radius scales with population rather than risk.
@@ -72,6 +122,7 @@ function BaseLayer({ basemap }) {
 
 export default function MapPage({ online }) {
   const navigate = useNavigate()
+  const mapRef = useRef(null)
   const [zones, setZones] = useState([])
   const [roads, setRoads] = useState([])
   const [stations, setStations] = useState([])
@@ -151,6 +202,7 @@ export default function MapPage({ online }) {
           minZoom={5}
           scrollWheelZoom
           zoomControl={false}
+          ref={mapRef}
         >
           {/* Default position is top-left, where the filter panel lives. */}
           <ZoomControl position="bottomright" />
@@ -200,6 +252,32 @@ export default function MapPage({ online }) {
                   </Tooltip>
                 </Polyline>
               ))}
+            </LayerGroup>
+          )}
+
+          {/* Halo ring under elevated zones. Drawn as its own layer so it sits
+              beneath every marker rather than only its own, and kept
+              non-interactive so it never steals a click from the marker. */}
+          {layers.zones && (
+            <LayerGroup>
+              {visibleZones
+                .filter((z) => z.risk_level === 'critical' || z.risk_level === 'high')
+                .map((z) => (
+                  <CircleMarker
+                    key={`halo-${z.zone_id}`}
+                    center={[z.latitude, z.longitude]}
+                    radius={markerRadius(z.population) * 2.1}
+                    interactive={false}
+                    className={z.risk_level === 'critical' ? 'pv-pulse-critical' : 'pv-pulse-high'}
+                    pathOptions={{
+                      color: RISK_COLORS[z.risk_level],
+                      fillColor: RISK_COLORS[z.risk_level],
+                      fillOpacity: 0.16,
+                      weight: 1,
+                      opacity: 0.5,
+                    }}
+                  />
+                ))}
             </LayerGroup>
           )}
 
@@ -406,14 +484,18 @@ export default function MapPage({ online }) {
             .filter((z) => z.risk_level === 'high' || z.risk_level === 'critical')
             .sort((a, b) => b.probability - a.probability)
             .slice(0, 12)
-            .map((z) => (
+            .map((z, idx) => (
               <div
                 key={z.zone_id}
-                className="queue-item"
-                style={{ marginBottom: 7, cursor: 'pointer' }}
-                onClick={() => navigate(`/zones/${z.zone_id}`)}
+                className="queue-item pv-enter"
+                style={{ marginBottom: 7, cursor: 'pointer', '--i': idx }}
+                title="Click to centre the map, double-click to open the zone"
+                onClick={() =>
+                  mapRef.current?.flyTo([z.latitude, z.longitude], 11, { duration: 1.1 })
+                }
+                onDoubleClick={() => navigate(`/zones/${z.zone_id}`)}
               >
-                <span className={`dot ${z.risk_level}`} />
+                <LiveDot tone={z.risk_level} />
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     {z.name}

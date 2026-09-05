@@ -1,12 +1,14 @@
-import { Suspense, lazy, useCallback, useEffect, useState } from 'react'
+import { Suspense, lazy, useCallback, useEffect, useRef, useState } from 'react'
 import { NavLink, Navigate, Route, Routes, useLocation } from 'react-router-dom'
 
 import { api, auth } from './lib/api'
 import { queueSize } from './lib/offline'
 import { useOnline } from './lib/useOnline'
+import { timeAgo } from './lib/format'
 
+import CommandPalette from './components/CommandPalette'
+import { LiveDot, SkeletonCard, ToastHost, pushToast } from './components/motion'
 import LoginPage from './pages/Login'
-import { Spinner } from './components/ui'
 
 // Split by route. The two screens a field officer actually opens on a phone -
 // sign-in and report submission - must not pull in Leaflet (150 KB) and
@@ -31,7 +33,26 @@ const NAV = [
   { to: '/system', label: 'System & model', icon: '⚙' },
 ]
 
-function Sidebar({ user, alertCount, queued, onSignOut }) {
+function Sidebar({ user, alertCount, queued, onSignOut, onOpenPalette }) {
+  const section = (items) =>
+    items.map((item) => (
+      <NavLink
+        key={item.to}
+        to={item.to}
+        end={item.end}
+        className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}
+      >
+        <span aria-hidden="true">{item.icon}</span>
+        {item.label}
+        {item.to === '/alerts' && alertCount > 0 && (
+          <span className="badge critical pv-pop">{alertCount}</span>
+        )}
+        {item.to === '/report' && queued > 0 && (
+          <span className="badge moderate pv-pop">{queued}</span>
+        )}
+      </NavLink>
+    ))
+
   return (
     <aside className="sidebar">
       <div className="brand">
@@ -50,50 +71,20 @@ function Sidebar({ user, alertCount, queued, onSignOut }) {
 
       <nav className="nav">
         <div className="nav-label">Monitoring</div>
-        {NAV.slice(0, 4).map((item) => (
-          <NavLink
-            key={item.to}
-            to={item.to}
-            end={item.end}
-            className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}
-          >
-            <span aria-hidden="true">{item.icon}</span>
-            {item.label}
-            {item.to === '/alerts' && alertCount > 0 && (
-              <span className="badge critical">{alertCount}</span>
-            )}
-          </NavLink>
-        ))}
-
+        {section(NAV.slice(0, 4))}
         <div className="nav-label">Field</div>
-        {NAV.slice(4, 6).map((item) => (
-          <NavLink
-            key={item.to}
-            to={item.to}
-            className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}
-          >
-            <span aria-hidden="true">{item.icon}</span>
-            {item.label}
-            {item.to === '/report' && queued > 0 && (
-              <span className="badge moderate">{queued}</span>
-            )}
-          </NavLink>
-        ))}
-
+        {section(NAV.slice(4, 6))}
         <div className="nav-label">Platform</div>
-        {NAV.slice(6).map((item) => (
-          <NavLink
-            key={item.to}
-            to={item.to}
-            className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}
-          >
-            <span aria-hidden="true">{item.icon}</span>
-            {item.label}
-          </NavLink>
-        ))}
+        {section(NAV.slice(6))}
       </nav>
 
       <div className="sidebar-foot">
+        <button className="sm ghost block" onClick={onOpenPalette} style={{ marginBottom: 10 }}>
+          <span>Search</span>
+          <span style={{ marginLeft: 'auto' }}>
+            <kbd>ctrl</kbd> <kbd>k</kbd>
+          </span>
+        </button>
         {user ? (
           <>
             <div style={{ color: 'var(--text)', fontWeight: 600 }}>{user.full_name}</div>
@@ -119,6 +110,13 @@ export default function App() {
   })
   const [alertCount, setAlertCount] = useState(0)
   const [queued, setQueued] = useState(0)
+  const [lastSync, setLastSync] = useState(null)
+  const [paletteZones, setPaletteZones] = useState([])
+  const [paletteRoads, setPaletteRoads] = useState([])
+
+  // Remembers which zones were already elevated, so a toast fires on the
+  // transition into danger rather than every sixty seconds while it persists.
+  const seenElevated = useRef(null)
 
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme)
@@ -130,7 +128,29 @@ export default function App() {
     if (!online) return
     try {
       const alerts = await api.alerts({ active_only: true, limit: 100 })
-      setAlertCount(alerts.filter((a) => a.level === 'critical' || a.level === 'high').length)
+      const urgent = alerts.filter((a) => a.level === 'critical' || a.level === 'high')
+      setAlertCount(urgent.length)
+      setLastSync(new Date().toISOString())
+
+      const current = new Set(urgent.map((a) => a.reference))
+      if (seenElevated.current === null) {
+        // First poll of the session: adopt the current state silently rather
+        // than announcing every standing alert as if it just happened.
+        seenElevated.current = current
+      } else {
+        urgent
+          .filter((a) => !seenElevated.current.has(a.reference))
+          .slice(0, 3)
+          .forEach((a) =>
+            pushToast({
+              tone: a.level,
+              title: `${a.level.toUpperCase()} - ${a.district}`,
+              message: a.headline.split(' - ').slice(1).join(' - ') || a.headline,
+              timeout: a.level === 'critical' ? 12000 : 8000,
+            }),
+          )
+        seenElevated.current = current
+      }
     } catch { /* offline or unauthenticated - counters are non-essential */ }
   }, [online])
 
@@ -140,18 +160,44 @@ export default function App() {
     return () => clearInterval(interval)
   }, [refreshCounters, location.pathname])
 
+  // Palette index: fetched once, refreshed lazily. Failure is silent because
+  // the palette is a convenience, not a dependency.
+  useEffect(() => {
+    if (!online) return
+    api.heatmap().then(setPaletteZones).catch(() => {})
+    api.roads().then(setPaletteRoads).catch(() => {})
+  }, [online])
+
+  const openPalette = () => {
+    window.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'k', ctrlKey: true, bubbles: true }),
+    )
+  }
+
   const signOut = () => {
     auth.clear()
     setUser(null)
+    pushToast({ tone: 'ok', message: 'Signed out.' })
   }
 
   if (location.pathname === '/login') {
-    return <LoginPage onSignedIn={(u) => setUser(u)} />
+    return (
+      <>
+        <LoginPage onSignedIn={(u) => setUser(u)} />
+        <ToastHost />
+      </>
+    )
   }
 
   return (
     <div className="app">
-      <Sidebar user={user} alertCount={alertCount} queued={queued} onSignOut={signOut} />
+      <Sidebar
+        user={user}
+        alertCount={alertCount}
+        queued={queued}
+        onSignOut={signOut}
+        onOpenPalette={openPalette}
+      />
       <div className="main">
         {!online && (
           <div className="offline-banner">
@@ -163,8 +209,11 @@ export default function App() {
         <div className="topbar">
           <h1>{NAV.find((n) => n.to === location.pathname)?.label || 'PRAHARI'}</h1>
           <div className="topbar-spacer" />
+          {lastSync && online && (
+            <span className="small dim nowrap">Updated {timeAgo(lastSync)}</span>
+          )}
           <span className={`conn ${online ? 'online' : 'offline'}`}>
-            <span className={`dot ${online ? 'low' : 'high'}`} />
+            {online ? <LiveDot tone="low" /> : <span className="dot high" />}
             {online ? 'Live' : 'Offline'}
           </span>
           <button
@@ -176,7 +225,16 @@ export default function App() {
           </button>
         </div>
 
-        <Suspense fallback={<div className="content"><Spinner /></div>}>
+        <Suspense
+          fallback={
+            <div className="content">
+              <div className="grid two">
+                <SkeletonCard lines={5} />
+                <SkeletonCard lines={5} />
+              </div>
+            </div>
+          }
+        >
           <Routes>
             <Route path="/" element={<DashboardPage online={online} />} />
             <Route path="/map" element={<MapPage online={online} />} />
@@ -193,6 +251,9 @@ export default function App() {
           </Routes>
         </Suspense>
       </div>
+
+      <CommandPalette zones={paletteZones} roads={paletteRoads} />
+      <ToastHost />
     </div>
   )
 }
